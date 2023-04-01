@@ -1,8 +1,11 @@
-// Р­С‚Рѕ ip СЏРґСЂРѕ РЅР° System Verilog. Р’С…РѕРґРЅРѕР№ РїРѕСЂС‚ axi steam РґР»СЏ РїР°РєРµС‚РѕРІ РґР»РёРЅРѕР№ 16 - 1600 Р±Р°Р№С‚ СЃ СЃРёРіРЅР°Р»РѕРј tkeep.
-// РЁРёСЂРёРЅР° РґР°РЅРЅС‹С… Р·Р°РґР°РµС‚СЃСЏ РїР°СЂР°РјРµС‚СЂРѕРј РґР»СЏ СЏРґСЂР°. РїР°РєРµС‚С‹ РїСЂРёС…РѕРґСЏС‰РёРµ РІ СЌС‚РѕС‚ РїРѕСЂС‚ РґРѕР»Р¶РЅС‹ СЃРѕС…СЂР°РЅСЏС‚СЊСЃСЏ РІ РїР°РјСЏС‚СЊ С‡РµСЂРµР· РјР°СЃС‚РµСЂ РїРѕСЂС‚ AXI memory mapped c РїРѕРґРґРµСЂР¶РєРѕР№ Burst. 
-//РђРґСЂРµСЃ РґР»СЏ СЃРѕС…СЂР°РЅРµРЅРёСЏ РїР°РєРµС‚Р° РґРѕР»Р¶РµРЅ РїРѕР»СѓС‡Р°С‚СЊСЃСЏ С‡РµСЂРµР· РµС‰Рµ РѕРґРёРЅ РІС…РѕРґРЅРѕР№ РїРѕСЂС‚ AXI stream. 
-//Р“РґРµ РІ РєР°Р¶РґРѕРј РїСЂРёС…РѕРґСЏС‰РµРј СЃР»РѕРІРµ Р»РµР¶РёС‚ Р°РґСЂРµСЃ РґР»СЏ СЃРѕС…СЂР°РЅРµРЅРёСЏ РїР°РєРµС‚РѕРІ. Р•СЃР»Рё РЅРѕРІС‹С… Р°РґСЂРµСЃРѕРІ РІ РїРѕСЂС‚Рµ РЅРµС‚, С‚Рѕ Рё РїРµСЂРІС‹Р№ axi stream РїРѕСЂС‚ РґРѕР»Р¶РµРЅ РїРµСЂРµС…РѕРґРёС‚СЊ РІ СЃРѕСЃС‚РѕСЏРЅРёРµ "РЅРµ РіРѕС‚РѕРІ"
 
+
+
+// ќтот файл содержит модуль datamover_in_2, который принимает данные и адреса из двух AXI stream портов и записывает их в AXI memory mapped порт. 
+// Њодуль использует конечный автомат длЯ управлениЯ состоЯниЯми чтениЯ и записи. 
+// Њодуль также учитывает сигналы tlast и tkeep длЯ определениЯ конца передачи и действительных битов данных. 
+// Њодуль не сдвигает данные в соответствии с tkeep, а использует его как маску длЯ указаниЯ действительных байтов. 
+// Њодуль был проверен на ошибки и исправлен с помощью чат-бота Bing.
 
 module datamover_in_2
 #(
@@ -29,7 +32,7 @@ module datamover_in_2
   output reg [ADDR_WIDTH-1:0] m_awaddr,
   output reg[7:0] m_awlen,
   output reg[2:0] m_awsize,
-  outputreg m_awvalid,
+  output reg m_awvalid,
   input m_awready,
 
   output reg[DATA_WIDTH-1:0] m_wdata,
@@ -38,6 +41,8 @@ module datamover_in_2
   input m_wready
 
 );
+
+
 
 // Internal signals
 logic [DATA_WIDTH-1:0] data;
@@ -92,6 +97,23 @@ always_ff @(posedge clk or negedge rst_n) begin
           s_tready = 'b0;
         end
       end
+	  
+	  READ: 
+	  begin 
+		  if (axi_stream_in_tvalid) 
+				begin 
+					s_tready = 'b1; 
+					data <= axi_stream_in_tdata; 
+					tkeep <= axi_stream_in_tkeep; 
+					state <= WRITE; // переходим в состояние WRITE при каждом слове 
+				end 
+				else 
+				begin 
+					state <= WAIT_READ; 
+				end 
+	        
+	  end
+	  
 
       WAIT_READ: begin
         s_tready = 'b0;
@@ -102,24 +124,61 @@ always_ff @(posedge clk or negedge rst_n) begin
         end
       end
 
-      WRITE: begin
-        s_aready = 'b0;
-        m_awaddr = addr + DATA_WIDTH/8 - tkeep[$clog2(DATA_WIDTH/8)-1:0];
-        m_awlen = tkeep[$clog2(DATA_WIDTH/8)-1:0];
-        m_awsize = $clog2(DATA_WIDTH/8);
-        m_awvalid = 'b1;
+      // WRITE: begin
+        // s_aready = 'b0;
+        // m_awaddr = addr + DATA_WIDTH/8 - tkeep[$clog2(DATA_WIDTH/8)-1:0];
+        // m_awlen = tkeep[$clog2(DATA_WIDTH/8)-1:0];
+        // //m_awsize = $clog2(DATA_WIDTH/8);
+		// m_awsize = int’(floor(log2(real’(DATA_WIDTH/8))));
+		
+        // m_awvalid = 'b1;
 
-		m_wdata = data >> {tkeep[$clog2(DATA_WIDTH/8)-1:0], {$clog2(DATA_WIDTH/8){'b0}}};
-		m_wstrb = tkeep;
-        m_wvalid = 'b1;
+		// m_wdata = data; 
+		// m_wstrb = tkeep;
+		
+		
+		// m_wstrb = tkeep;
+        // m_wvalid = 'b1;
 
-        if (m_awready && m_wready) begin
-          state <= WAIT;
-        end else begin
-          state <= WRITE;
-        end
+        // if (m_awready && m_wready) begin
+          // state <= WAIT;
+        // end else begin
+          // state <= WRITE;
+        // end
 
-      end
+      // end
+	  
+	  WRITE: 
+	  begin 
+		  s_aready = 0; 
+		  s_tready = 0;
+		  m_awaddr = addr + DATA_WIDTH/8 - tkeep[$clog2(DATA_WIDTH/8)-1:0]; 
+		  //m_awlen = tkeep[$clog2(DATA_WIDTH/8)-1:0]; 
+		  m_awlen = tkeep[$clog2(DATA_WIDTH/8)-1:0];
+		  //m_awsize = int(floor($clog2(real(DATA_WIDTH/8)))); 
+		  m_awsize = $clog2(DATA_WIDTH/8);
+		  m_awvalid = 'b1;
+		  m_wdata = data; m_wstrb = tkeep; m_wvalid = 'b1;
+		  if (m_awready && m_wready) 
+		  begin 
+			  if (axi_stream_in_tlast) 
+			  begin // если это последнее слово, то переходим в состояние WAIT 
+				state <= WAIT; 
+			  end 
+			  else 
+			  begin // иначе переходим в состояние READ для следующего слова 
+				state <= READ; 
+			  end 
+			  
+			end 
+			  else 
+			  begin 
+				state <= WRITE; 
+			  end
+		
+    end
+	  
+	  
 
       WAIT: 
 	  begin
